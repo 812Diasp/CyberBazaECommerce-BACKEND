@@ -1,3 +1,5 @@
+using CyberBazaECommerce;
+using CyberBazaECommerce.Controllers;
 using CyberBazaECommerce.Models;
 using CyberBazaECommerce.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -9,7 +11,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
 using MongoDB.Driver;
+using System.Security.Claims;
 using System.Text;
 var builder = WebApplication.CreateBuilder(args);
 
@@ -40,32 +44,74 @@ return client.GetDatabase(settings.DatabaseName);
 });
 // Регистрируем ProductService как Scoped (обновление для каждого запроса)
 builder.Services.AddScoped<ProductService>();
+builder.Services.AddScoped<IReviewService, ReviewService>();
+builder.Services.AddScoped<ILogger<ReviewService>, Logger<ReviewService>>();
 // --- Конец настроек MongoDB ---
 
 
 // Configure JWT Authentication
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
- .AddJwtBearer(options =>
-{
-var jwtSettings = builder.Configuration.GetSection("Jwt");
-var key = Encoding.UTF8.GetBytes(jwtSettings["Key"]);
+	 .AddJwtBearer(options =>
+	 {
+		 var jwtSettings = builder.Configuration.GetSection("Jwt");
+		 var key = Encoding.UTF8.GetBytes(jwtSettings["Key"]);
 
-options.TokenValidationParameters = new TokenValidationParameters
-{
-ValidateIssuer = true,
-ValidateAudience = true,
-ValidateLifetime = true,
-ValidateIssuerSigningKey = true,
-ValidIssuer = jwtSettings["Issuer"],
-ValidAudience = jwtSettings["Audience"],
-IssuerSigningKey = new SymmetricSecurityKey(key),
-ClockSkew = TimeSpan.Zero // Отключение Clock Skew для более точного сравнения времени.
-};
-});
+		 options.TokenValidationParameters = new TokenValidationParameters
+		 {
+			 ValidateIssuer = true,
+			 ValidateAudience = true,
+			 ValidateLifetime = true,
+			 ValidateIssuerSigningKey = true,
+			 ValidIssuer = jwtSettings["Issuer"],
+			 ValidAudience = jwtSettings["Audience"],
+			 IssuerSigningKey = new SymmetricSecurityKey(key),
+			 ClockSkew = TimeSpan.Zero, // Отключение Clock Skew для более точного сравнения времени.
+		 };
+		 options.Events = new JwtBearerEvents
+		 {
+			 OnTokenValidated = context =>
+			 {
+				 // Проверка на наличие роли в claim
+				 if (!context.Principal.HasClaim(c => c.Type == ClaimTypes.Role))
+				 {
+					 context.Fail("You do not have the correct roles.");
+				 }
+				 return Task.CompletedTask;
+			 }
+		 };
+	 });
 
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(c =>
+{
+	c.SwaggerDoc("v1", new OpenApiInfo { Title = "CyberBazaECommerce", Version = "v1" });
+
+	c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+	{
+		Description = "JWT Authorization header using the Bearer scheme.",
+		Name = "Authorization",
+		In = ParameterLocation.Header,
+		Type = SecuritySchemeType.Http,
+		Scheme = "bearer",
+		BearerFormat = "JWT"
+	});
+	c.AddSecurityRequirement(new OpenApiSecurityRequirement
+	{
+	{
+		new OpenApiSecurityScheme
+		{
+			Reference = new OpenApiReference
+			{
+			   Type = ReferenceType.SecurityScheme,
+				Id = "Bearer"
+			 }
+		},
+	new string[] { }
+	 }
+	});
+	c.OperationFilter<AuthorizeCheckOperationFilter>(); // Add this line
+});
 
 // -- Настройка CORS (если нужно) --
 // Пример настройки, разрешающий запросы с любого домена (не рекомендуется для production)

@@ -46,6 +46,7 @@ namespace CyberBazaECommerce.Controllers
 			{
 				Username = model.Username,
 				Email = model.Email,
+				Role = "customer" // Роль по умолчанию для новых пользователей
 			};
 
 			user.PasswordHash = _passwordHasher.HashPassword(user, model.Password);
@@ -76,12 +77,10 @@ namespace CyberBazaECommerce.Controllers
 				return Unauthorized("Invalid username or password");
 			}
 
-			var token = _jwtService.GenerateJwtToken(user.Username);
-
+			var token = _jwtService.GenerateJwtToken(user.Id, user.Username, user.Role); // Изменено
 			return Ok(new { Token = token });
 		}
 	}
-
 	public class LoginModel
 	{
 		public string Username { get; set; }

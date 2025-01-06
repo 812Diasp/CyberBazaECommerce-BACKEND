@@ -14,14 +14,25 @@ namespace CyberBazaECommerce.Services
 			_config = config;
 		}
 
-		public string GenerateJwtToken(string username)
+		public string GenerateJwtToken(string userId, string username, string role = null) // Изменено
 		{
 			var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]));
 			var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
-			var claims = new[] {
-				 new Claim(ClaimTypes.Name, username)
-			  };
+			var claims = new List<Claim> {
+				new Claim(ClaimTypes.Name, username), // Добавляем имя пользователя
+               new Claim("uid", userId), // Добавляем идентификатор пользователя (наш uid)
+                // Добавляем claim для роли, если она есть
+            };
+			if (!string.IsNullOrEmpty(role))
+			{
+				claims.Add(new Claim(ClaimTypes.Role, role));
+			}
+			else
+			{
+				claims.Add(new Claim(ClaimTypes.Role, "customer"));
+			}
+
 
 			var token = new JwtSecurityToken(
 				issuer: _config["Jwt:Issuer"],

@@ -9,7 +9,7 @@ namespace CyberBazaECommerce.Services
 
 		public ProductService(IMongoDatabase database)
 		{
-			_products = database.GetCollection<Product>("products");
+			_products = database.GetCollection<Product>("Products");
 		}
 
 		public async Task<List<Product>> GetProductsAsync()
@@ -21,7 +21,7 @@ namespace CyberBazaECommerce.Services
 		{
 			return await _products.Find(p => p.Id == id).FirstOrDefaultAsync();
 		}
-
+		
 		public async Task<List<Product>> GetProductsByDiscountAsync()
 		{
 			return await _products.Find(p => p.DiscountedPrice != null).ToListAsync();
@@ -53,7 +53,23 @@ namespace CyberBazaECommerce.Services
 				throw;
 			}
 		}
+		public async Task CreateManyProductsAsync(List<Product> products)
+		{
+			try {
+				await _products.InsertManyAsync(products);
 
+			}
+			catch (MongoWriteException ex)
+			{
+				Console.WriteLine($"Ошибка при вставке продуктов: {ex.Message}");
+				throw;
+			}
+			catch (Exception ex)
+			{
+				Console.WriteLine($"Ошибка при вставке продуктов: {ex.Message}");
+				throw;
+			}
+		}
 		public async Task UpdateProductAsync(string id, Product updatedProduct)
 		{
 			try

@@ -16,5 +16,7 @@ namespace CyberBazaECommerce.Models
 
 		[BsonElement("Email")]
 		public string Email { get; set; }
+		[BsonElement("Role")] // Добавляем поле для хранения роли
+		public string Role { get; set; } = "customer"; // Set default role to customer
 	}
 }
