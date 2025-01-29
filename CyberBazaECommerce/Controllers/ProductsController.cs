@@ -1,21 +1,30 @@
 ﻿using CyberBazaECommerce.Models;
 using CyberBazaECommerce.Services;
+using CyberBazaECommerce.Utils;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.OpenApi.Models;
+using Swashbuckle.AspNetCore.Annotations;
 
 namespace CyberBazaECommerce.Controllers
 {
+	
 	[ApiController]
 	[Route("api/products")]
+	[EnableCors("AllowAll")]
 	public class ProductsController : ControllerBase
 	{
 		private readonly ProductService _productService;
+		private readonly CsrfValidator _csrfValidator;
 
-		// Конструктор для внедрения зависимостей
-		public ProductsController(ProductService productService)
+
+		public ProductsController(ProductService productService, CsrfValidator csrfValidator)
 		{
 			_productService = productService;
+			_csrfValidator = csrfValidator;
 		}
+
 		[HttpGet]
 		public async Task<ActionResult<List<Product>>> GetProducts()
 		{
@@ -48,28 +57,65 @@ namespace CyberBazaECommerce.Controllers
 			var products = await _productService.GetProductsByCategoryAsync(category);
 			return Ok(products);
 		}
-		private IActionResult ValidateCsrfToken()
+		[HttpGet("search")]
+		public async Task<ActionResult<List<Product>>> SearchProducts(string query)
 		{
-			string clientToken = Request.Headers["X-CSRF-Token"];
-			if (string.IsNullOrEmpty(clientToken))
-			{
-				return BadRequest("X-CSRF-Token header is missing");
-			}
-			var serverToken = Request.Cookies["CSRF-TOKEN"];
-			if (serverToken == null || serverToken != clientToken)
-			{
-				return StatusCode(403, "Invalid X-CSRF-Token");
-			}
-			return Ok();
-
+			var products = await _productService.SearchProductsAsync(query);
+			return Ok(products);
 		}
+
+		[HttpGet("toprated")]
+		public async Task<ActionResult<List<Product>>> GetTopRatedProducts()
+		{
+			var products = await _productService.GetTopRatedProductsAsync();
+			return Ok(products);
+		}
+		[HttpGet("sku/{sku}")]
+		public async Task<ActionResult<Product>> GetProductBySku(string sku)
+		{
+			var product = await _productService.GetProductBySkuAsync(sku);
+			if (product == null)
+			{
+				return NotFound();
+			}
+			return Ok(product);
+		}
+		[HttpGet("related/{productId}")]
+		public async Task<IActionResult> GetRelatedProducts(string productId)
+		{
+			try
+			{
+				var product = await _productService.GetProductByIdAsync(productId);
+				if (product == null) return NotFound();
+
+				// Получаем все теги продукта
+				var tags = product.Tags;
+
+				//Получаем похожие продукты
+				List<Product> relatedProducts = new List<Product>();
+				foreach (var tag in tags)
+				{
+					var productsByTag = await _productService.GetProductsByTag(tag);
+					relatedProducts.AddRange(productsByTag.Where(p => p.Id != productId));
+				}
+
+				//Возвращаем список
+				return Ok(relatedProducts.DistinctBy(p => p.Id).Take(10)); // Take(10) для ограничения количества
+			}
+			catch (Exception ex)
+			{
+				return BadRequest(ex.Message);
+			}
+		}
+
 
 
 		[HttpPost]
 		[Authorize(Roles = "admin")]
+		
 		public async Task<IActionResult> CreateProduct([FromBody] CreateProductDto productDto)
 		{
-			var validationResult = ValidateCsrfToken();
+			var validationResult = _csrfValidator.ValidateCsrfToken();
 			if (validationResult is not OkResult)
 			{
 				return validationResult;
@@ -80,19 +126,33 @@ namespace CyberBazaECommerce.Controllers
 				{
 					Brand = productDto.Brand,
 					Category = productDto.Category,
+					Image = productDto.Image,
 					Name = productDto.Name,
 					Description = productDto.Description,
-					Image = productDto.Image,
 					Characteristics = productDto.Characteristics,
 					Price = productDto.Price,
-					DiscountedPrice = productDto.DiscountedPrice
+					OriginalPrice = productDto.OriginalPrice ?? productDto.Price,
+					DiscountPercentage = productDto.DiscountPercentage,
+					DiscountedPrice = productDto.DiscountedPrice,
+					DiscountStartDate = productDto.DiscountStartDate,
+					DiscountEndDate = productDto.DiscountEndDate,
+					VatRate = productDto.VatRate,
+					StockQuantity = productDto.StockQuantity,
+					Weight = productDto.Weight,
+					Dimensions = productDto.Dimensions,
+					SKU = productDto.SKU,
+					Tags = productDto.Tags,
+					IsAvailable = productDto.IsAvailable,
+					Manufacturer = productDto.Manufacturer,
+					ShippingCost = productDto.ShippingCost,
+					Vendor = productDto.Vendor,
+					WarrantyPeriod = productDto.WarrantyPeriod
 				};
-
 				await _productService.CreateProductAsync(product);
 				var createdProduct = await _productService.GetProductByIdAsync(product.Id);
 				if (createdProduct == null)
 				{
-					return StatusCode(500, "Произошла ошибка при сохранении продукта. Попробуйте ещё раз.");
+					return StatusCode(500, "Error oqured in creating product.");
 				}
 				return CreatedAtAction(nameof(GetProductById), new { id = product.Id }, createdProduct);
 			}
@@ -102,44 +162,53 @@ namespace CyberBazaECommerce.Controllers
 			}
 			catch (Exception ex)
 			{
-				return StatusCode(500, $"Ошибка при создании продукта: {ex.Message}");
+				return StatusCode(500, $"Error oqured creating product: {ex.Message}");
 			}
 		}
-		[HttpPost("many")] // Используем маршрут /api/products/many
+
+		[HttpPost("many")]
 		[Authorize(Roles = "admin")]
 		public async Task<IActionResult> AddManyProducts([FromBody] CreateProductsDto productsDto)
 		{
-			var validationResult = ValidateCsrfToken();
+			var validationResult = _csrfValidator.ValidateCsrfToken();
 			if (validationResult is not OkResult)
 			{
 				return validationResult;
 			}
-
 			if (productsDto == null || productsDto.Products == null || !productsDto.Products.Any())
 			{
-				return BadRequest("Необходимо предоставить хотя бы один продукт для добавления.");
+				return BadRequest("Need at least one product");
 			}
-
 			try
 			{
 				var products = productsDto.Products.Select(dto => new Product
 				{
 					Brand = dto.Brand,
 					Category = dto.Category,
+					Image = dto.Image,
 					Name = dto.Name,
 					Description = dto.Description,
-					Image = dto.Image,
 					Characteristics = dto.Characteristics,
 					Price = dto.Price,
-					DiscountedPrice = dto.DiscountedPrice
+					OriginalPrice = dto.OriginalPrice ?? dto.Price,
+					DiscountPercentage = dto.DiscountPercentage,
+					DiscountedPrice = dto.DiscountedPrice,
+					DiscountStartDate = dto.DiscountStartDate,
+					DiscountEndDate = dto.DiscountEndDate,
+					VatRate = dto.VatRate,
+					StockQuantity = dto.StockQuantity,
+					Weight = dto.Weight,
+					Dimensions = dto.Dimensions,
+					SKU = dto.SKU,
+					Tags = dto.Tags,
+					IsAvailable = dto.IsAvailable,
+					Manufacturer = dto.Manufacturer,
+					ShippingCost = dto.ShippingCost,
+					Vendor = dto.Vendor,
+					WarrantyPeriod = dto.WarrantyPeriod
 				}).ToList();
-
 				await _productService.CreateManyProductsAsync(products);
-
-				// Опционально: возвращаем созданные продукты (или их IDs)
-				// Для этого, нужно будет доработать метод CreateManyProductsAsync, чтобы он возвращал список добавленных продуктов или их IDs
-
-				return Ok("Продукты успешно добавлены."); // Или: return CreatedAtAction(nameof(GetProductById), products.Select(p => new { id = p.Id }), products)
+				return Ok("Product Successfully added."); // Или: return CreatedAtAction(nameof(GetProductById), products.Select(p => new { id = p.Id }), products)
 			}
 			catch (ArgumentException ex)
 			{
@@ -147,15 +216,14 @@ namespace CyberBazaECommerce.Controllers
 			}
 			catch (Exception ex)
 			{
-				return StatusCode(500, $"Ошибка при добавлении продуктов: {ex.Message}");
+				return StatusCode(500, $"error of adding products: {ex.Message}");
 			}
 		}
-
 		[HttpPut("{id}")]
 		[Authorize(Roles = "admin")]
 		public async Task<IActionResult> UpdateProduct(string id, [FromBody] Product updatedProduct)
 		{
-			var validationResult = ValidateCsrfToken();
+			var validationResult = _csrfValidator.ValidateCsrfToken();
 			if (validationResult is not OkResult)
 			{
 				return validationResult;
@@ -165,7 +233,6 @@ namespace CyberBazaECommerce.Controllers
 			{
 				return NotFound();
 			}
-
 			await _productService.UpdateProductAsync(id, updatedProduct);
 			return NoContent();
 		}
@@ -174,7 +241,7 @@ namespace CyberBazaECommerce.Controllers
 		[Authorize(Roles = "admin")]
 		public async Task<IActionResult> UpdateProductField(string id, string fieldName, [FromBody] object value)
 		{
-			var validationResult = ValidateCsrfToken();
+			var validationResult = _csrfValidator.ValidateCsrfToken();
 			if (validationResult is not OkResult)
 			{
 				return validationResult;
@@ -184,7 +251,6 @@ namespace CyberBazaECommerce.Controllers
 			{
 				return NotFound();
 			}
-
 			try
 			{
 				await _productService.UpdateProductFieldAsync(id, fieldName, value);
@@ -195,12 +261,11 @@ namespace CyberBazaECommerce.Controllers
 				return BadRequest(ex.Message);
 			}
 		}
-
 		[HttpDelete("{id}")]
 		[Authorize(Roles = "admin")]
 		public async Task<IActionResult> DeleteProduct(string id)
 		{
-			var validationResult = ValidateCsrfToken();
+			var validationResult = _csrfValidator.ValidateCsrfToken();
 			if (validationResult is not OkResult)
 			{
 				return validationResult;
@@ -210,7 +275,6 @@ namespace CyberBazaECommerce.Controllers
 			{
 				return NotFound();
 			}
-
 			await _productService.DeleteProductAsync(id);
 			return NoContent();
 		}

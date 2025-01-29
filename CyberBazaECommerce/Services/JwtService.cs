@@ -21,7 +21,8 @@ namespace CyberBazaECommerce.Services
 
 			var claims = new List<Claim> {
 				new Claim(ClaimTypes.Name, username), // Добавляем имя пользователя
-               new Claim("uid", userId), // Добавляем идентификатор пользователя (наш uid)
+				new Claim(ClaimTypes.NameIdentifier, userId),// Добавляем для корзины пользователя
+			   new Claim("uid", userId), // Добавляем идентификатор пользователя (наш uid)
                 // Добавляем claim для роли, если она есть
             };
 			if (!string.IsNullOrEmpty(role))

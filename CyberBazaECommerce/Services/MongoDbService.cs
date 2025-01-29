@@ -30,5 +30,10 @@ namespace CyberBazaECommerce.Services
 		{
 			await _usersCollection.InsertOneAsync(user);
 		}
+		public async Task UpdateUserAsync(User user)
+		{
+			var filter = Builders<User>.Filter.Eq(u => u.Id, user.Id);
+			await _usersCollection.ReplaceOneAsync(filter, user);
+		}
 	}
 }

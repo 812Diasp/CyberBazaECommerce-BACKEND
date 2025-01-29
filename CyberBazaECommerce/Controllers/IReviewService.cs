@@ -22,27 +22,31 @@ namespace CyberBazaECommerce.Controllers
 			_reviews = database.GetCollection<Review>("Reviews");
 			_logger = logger;
 		}
-
 		public async Task AddReviewAsync(string productId, Review review)
 		{
+			var product = await _products.Find(p => p.Id == productId).FirstOrDefaultAsync();
+
+			if (product == null)
+			{
+				_logger.LogWarning($"Product with id: {productId} not found");
+				throw new ArgumentException($"Product with id: {productId} not found");
+			}
+			// Проверка, что пользователь уже оставлял отзыв для этого продукта
+			if (product.Reviews != null && product.Reviews.Any(r => r.UserId == review.UserId))
+			{
+				_logger.LogWarning($"User with id: {review.UserId} already left a review for product with id: {productId}");
+				throw new InvalidOperationException($"User with id: {review.UserId} already left a review for product with id: {productId}");
+			}
+
 			review.Date = DateTime.UtcNow;
 			await _reviews.InsertOneAsync(review);
 			_logger.LogInformation($"Review added to collection: {review.Id}");
 
-			var product = await _products.Find(p => p.Id == productId).FirstOrDefaultAsync();
+			var update = Builders<Product>.Update.Push(p => p.Reviews, review);
 
-			if (product != null)
-			{
-				var update = Builders<Product>.Update.Push(p => p.Reviews, review);
-
-				await _products.UpdateOneAsync(p => p.Id == productId, update);
-				_logger.LogInformation($"Review added to product: {product.Id}, review count: {product.Reviews.Count}");
-				await UpdateProductRatingAsync(productId);
-			}
-			else
-			{
-				_logger.LogWarning($"Product with id: {productId} not found");
-			}
+			await _products.UpdateOneAsync(p => p.Id == productId, update);
+			_logger.LogInformation($"Review added to product: {product.Id}, review count: {product.Reviews.Count}");
+			await UpdateProductRatingAsync(productId);
 		}
 		public async Task UpdateProductRatingAsync(string productId)
 		{
@@ -50,27 +54,34 @@ namespace CyberBazaECommerce.Controllers
 
 			if (product != null)
 			{
-				var update = Builders<Product>.Update;
+				var reviews = product.Reviews;
+				int reviewCount = reviews.Count;
+				double averageRating = 0;
 
-				UpdateDefinition<Product> updateDefinition;
+				// Подсчет звездных отзывов
+				int fiveStarCount = reviews.Count(r => r.Rating == 5);
+				int fourStarCount = reviews.Count(r => r.Rating == 4);
+				int threeStarCount = reviews.Count(r => r.Rating == 3);
+				int twoStarCount = reviews.Count(r => r.Rating == 2);
+				int oneStarCount = reviews.Count(r => r.Rating == 1);
 
-				if (product.Reviews != null && product.Reviews.Any())
+				//Вычисление среднего рейтинга
+				if (reviewCount > 0)
 				{
-					var reviewCount = product.Reviews.Count;
-					var averageRating = Math.Round(product.Reviews.Average(r => r.Rating), 1);
-					updateDefinition = update.Set(p => p.ReviewCount, reviewCount)
-							.Set(p => p.AverageRating, averageRating);
-					_logger.LogInformation($"Product updated: {product.Id}, reviewCount: {reviewCount}, averageRating: {averageRating}");
+					averageRating = Math.Round(reviews.Average(r => r.Rating), 1);
 				}
-				else
-				{
-					updateDefinition = update
-							.Set(p => p.ReviewCount, 0)
-						   .Set(p => p.AverageRating, 0);
-					_logger.LogInformation($"Product updated: {product.Id}, reviewCount: 0, averageRating: 0");
-				}
-				await _products.UpdateOneAsync(p => p.Id == productId, updateDefinition);
-				_logger.LogInformation($"Product updated in db: {product.Id}");
+
+				var update = Builders<Product>.Update
+					.Set(p => p.ReviewCount, reviewCount)
+					.Set(p => p.AverageRating, averageRating)
+					.Set(p => p.FiveStarRatingCount, fiveStarCount)
+					.Set(p => p.FourStarRatingCount, fourStarCount)
+					.Set(p => p.ThreeStarRatingCount, threeStarCount)
+					.Set(p => p.TwoStarRatingCount, twoStarCount)
+					.Set(p => p.OneStarRatingCount, oneStarCount);
+
+				await _products.UpdateOneAsync(p => p.Id == productId, update);
+				_logger.LogInformation($"Product updated: {product.Id}, reviewCount: {reviewCount}, averageRating: {averageRating}");
 
 			}
 			else
@@ -78,12 +89,12 @@ namespace CyberBazaECommerce.Controllers
 				_logger.LogWarning($"Product with id: {productId} not found when updating rating");
 			}
 		}
+
 		public async Task<List<Review>> GetReviewsByProductIdAsync(string productId)
 		{
 			var product = await _products.Find(p => p.Id == productId).FirstOrDefaultAsync();
 
 			return product?.Reviews;
 		}
-		
 	}
 }

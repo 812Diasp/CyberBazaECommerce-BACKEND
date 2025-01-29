@@ -1,9 +1,11 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Cors;
+using Microsoft.AspNetCore.Mvc;
 
 namespace CyberBazaECommerce.Controllers
 {
 	[ApiController]
 	[Route("api/csrf")]
+	[EnableCors("AllowAll")]
 	public class CsrfController : ControllerBase
 	{
 		[HttpGet]
@@ -14,14 +16,14 @@ namespace CyberBazaECommerce.Controllers
 			// Set the cookie
 			var cookieOptions = new CookieOptions
 			{
-				HttpOnly = true,
-				Secure = true, // Set Secure attribute only for HTTPS
+				HttpOnly = false, // Куки доступна в JS
 				SameSite = SameSiteMode.None,
-				IsEssential = true,
+				Secure = true, // Кука доступна только при HTTPS
+				IsEssential = true
 			};
 
 			Response.Cookies.Append("CSRF-TOKEN", token, cookieOptions);
-			return Ok(new { Token = token });
+			return Ok(new { token = token });
 		}
 	}
 }

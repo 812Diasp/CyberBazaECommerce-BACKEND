@@ -2,6 +2,7 @@ using CyberBazaECommerce;
 using CyberBazaECommerce.Controllers;
 using CyberBazaECommerce.Models;
 using CyberBazaECommerce.Services;
+using CyberBazaECommerce.Utils;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -42,10 +43,15 @@ var client = provider.GetRequiredService<IMongoClient>();
 var settings = provider.GetRequiredService<IOptions<MongoDbSettings>>().Value;
 return client.GetDatabase(settings.DatabaseName);
 });
+//валидацяи csrf
+builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
+builder.Services.AddScoped<CsrfValidator>();
 // Регистрируем ProductService как Scoped (обновление для каждого запроса)
 builder.Services.AddScoped<ProductService>();
 builder.Services.AddScoped<IReviewService, ReviewService>();
 builder.Services.AddScoped<ILogger<ReviewService>, Logger<ReviewService>>();
+//userservice for cart
+builder.Services.AddScoped<UserService>();
 // --- Конец настроек MongoDB ---
 
 
@@ -85,6 +91,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
+	
 	c.SwaggerDoc("v1", new OpenApiInfo { Title = "CyberBazaECommerce", Version = "v1" });
 
 	c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
@@ -117,10 +124,14 @@ builder.Services.AddSwaggerGen(c =>
 // Пример настройки, разрешающий запросы с любого домена (не рекомендуется для production)
 builder.Services.AddCors(options =>
 {
-options.AddPolicy("AllowAll",
-	builder => builder.AllowAnyOrigin()
-	.AllowAnyMethod()
-	.AllowAnyHeader());
+	options.AddPolicy("AllowAll", builder =>
+	{
+		builder
+		   .WithOrigins("http://localhost:5173") //  Указываем доверенный домен frontend
+			.AllowAnyMethod()
+			.AllowAnyHeader()
+			.AllowCredentials(); //  Разрешаем отправку кук
+	});
 });
 // -- Конец настройки CORS --
 
@@ -133,14 +144,13 @@ app.UseSwagger();
 app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
 
-// -- Use CORS (если нужно) --
+app.UseHttpsRedirection();
 app.UseCors("AllowAll");
 // -- Конец Use CORS --
+app.UseAuthentication();
+app.UseAuthorization();
 
-app.UseAuthentication(); // Add Authentication Middleware
-app.UseAuthorization(); // Add Authorization Middleware
 
 app.MapControllers();
 
