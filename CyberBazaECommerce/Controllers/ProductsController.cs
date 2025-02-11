@@ -4,12 +4,15 @@ using CyberBazaECommerce.Utils;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.OpenApi.Models;
 using Swashbuckle.AspNetCore.Annotations;
+using System.Security.Claims;
+using System.Text.Json;
 
 namespace CyberBazaECommerce.Controllers
 {
-	
+
 	[ApiController]
 	[Route("api/products")]
 	[EnableCors("AllowAll")]
@@ -17,19 +20,124 @@ namespace CyberBazaECommerce.Controllers
 	{
 		private readonly ProductService _productService;
 		private readonly CsrfValidator _csrfValidator;
+		private readonly IDistributedCache _distributedCache;
+		private readonly UserService _userService;
 
-
-		public ProductsController(ProductService productService, CsrfValidator csrfValidator)
+		public ProductsController(ProductService productService, CsrfValidator csrfValidator, IDistributedCache distributedCache,UserService userService)
 		{
 			_productService = productService;
 			_csrfValidator = csrfValidator;
+			_distributedCache = distributedCache;
+			_userService = userService;
 		}
-
 		[HttpGet]
 		public async Task<ActionResult<List<Product>>> GetProducts()
 		{
-			var products = await _productService.GetProductsAsync();
-			return Ok(products);
+			string recordKey = "productsList"; // Ключ для кэширования списка продуктов
+
+			var cachedProducts = await _distributedCache.GetStringAsync(recordKey); // Проверяем, есть ли список в кэше
+
+			if (cachedProducts != null) // Если данные есть в кеше
+			{
+				var products = JsonSerializer.Deserialize<List<Product>>(cachedProducts);
+				var filteredProducts = products.Where(p => p.Category != "18+").ToList(); // Фильтруем данные из кэша
+
+				return Ok(filteredProducts); // Возвращаем отфильтрованные данные из кэша
+			}
+
+			var productsFromDb = await _productService.GetProductsAsync(); // Получаем данные из сервиса (базы данных)
+
+			var filteredProductsFromDb = productsFromDb.Where(p => p.Category != "18+").ToList(); // Фильтруем данные из базы данных
+
+			var cacheOptions = new DistributedCacheEntryOptions()
+				.SetAbsoluteExpiration(DateTime.Now.AddMinutes(5)); // Устанавливаем время жизни кэша (например, 5 минут)
+
+			// Сериализуем данные в JSON
+			await _distributedCache.SetStringAsync(recordKey, JsonSerializer.Serialize(filteredProductsFromDb), cacheOptions); // Сохраняем отфильтрованные данные в кэше
+
+			return Ok(filteredProductsFromDb); // Возвращаем отфильтрованные данные из базы данных
+		}
+		[HttpPost("{productId}/favorites")]
+		[Authorize]
+		public async Task<IActionResult> AddToFavorites(string productId)
+		{
+			var userId = User.FindFirst("uid")?.Value;
+
+			if (string.IsNullOrEmpty(userId))
+			{
+				return BadRequest("User ID not found in JWT");
+			}
+
+			var product = await _productService.GetProductByIdAsync(productId);
+			if (product == null)
+			{
+				return NotFound("Product not found");
+			}
+
+
+			var user = await _userService.GetUserByIdAsync(userId);
+			if (user == null)
+			{
+				return NotFound("User not found");
+			}
+
+
+			if (user.Favorites.Contains(productId))
+			{
+				user.Favorites.Remove(productId);
+				await _userService.UpdateUserAsync(user);
+				return Ok("Product removed from favorites");
+			}
+			user.Favorites.Add(productId);
+			var updateResult = await _userService.UpdateUserAsync(user);
+
+			if (!updateResult)
+			{
+				return BadRequest("Failed to update user's favorites list");
+			}
+
+			return Ok("Product added to favorites");
+		}
+
+		[HttpPost("{productId}/tracking")]
+		[Authorize]
+		public async Task<IActionResult> AddToTracking(string productId)
+		{
+			var userId = User.FindFirst("uid")?.Value;
+
+			if (string.IsNullOrEmpty(userId))
+			{
+				return BadRequest("User ID not found in JWT");
+			}
+			var product = await _productService.GetProductByIdAsync(productId);
+
+			if (product == null)
+			{
+				return NotFound("Product not found");
+			}
+
+			var user = await _userService.GetUserByIdAsync(userId);
+			if (user == null)
+			{
+				return NotFound("User not found");
+			}
+
+
+			if (user.Tracking.Contains(productId))
+			{
+				user.Tracking.Remove(productId);
+				await _userService.UpdateUserAsync(user);
+				return Ok("Product removed from tracking");
+			}
+
+			user.Tracking.Add(productId);
+			var updateResult = await _userService.UpdateUserAsync(user);
+
+			if (!updateResult)
+			{
+				return BadRequest("Failed to update user's tracking list");
+			}
+			return Ok("Product added to tracking");
 		}
 
 
@@ -60,6 +168,11 @@ namespace CyberBazaECommerce.Controllers
 		[HttpGet("search")]
 		public async Task<ActionResult<List<Product>>> SearchProducts(string query)
 		{
+			if (string.IsNullOrWhiteSpace(query))
+			{
+				return Ok(new List<Product>()); 
+			}
+
 			var products = await _productService.SearchProductsAsync(query);
 			return Ok(products);
 		}
@@ -70,16 +183,7 @@ namespace CyberBazaECommerce.Controllers
 			var products = await _productService.GetTopRatedProductsAsync();
 			return Ok(products);
 		}
-		[HttpGet("sku/{sku}")]
-		public async Task<ActionResult<Product>> GetProductBySku(string sku)
-		{
-			var product = await _productService.GetProductBySkuAsync(sku);
-			if (product == null)
-			{
-				return NotFound();
-			}
-			return Ok(product);
-		}
+		
 		[HttpGet("related/{productId}")]
 		public async Task<IActionResult> GetRelatedProducts(string productId)
 		{
@@ -112,21 +216,16 @@ namespace CyberBazaECommerce.Controllers
 
 		[HttpPost]
 		[Authorize(Roles = "admin")]
-		
 		public async Task<IActionResult> CreateProduct([FromBody] CreateProductDto productDto)
 		{
-			var validationResult = _csrfValidator.ValidateCsrfToken();
-			if (validationResult is not OkResult)
-			{
-				return validationResult;
-			}
 			try
 			{
 				var product = new Product
 				{
 					Brand = productDto.Brand,
 					Category = productDto.Category,
-					Image = productDto.Image,
+					MainImage = productDto.MainImage,
+					AdditionalImages = productDto.AdditionalImages,
 					Name = productDto.Name,
 					Description = productDto.Description,
 					Characteristics = productDto.Characteristics,
@@ -140,20 +239,24 @@ namespace CyberBazaECommerce.Controllers
 					StockQuantity = productDto.StockQuantity,
 					Weight = productDto.Weight,
 					Dimensions = productDto.Dimensions,
-					SKU = productDto.SKU,
 					Tags = productDto.Tags,
 					IsAvailable = productDto.IsAvailable,
 					Manufacturer = productDto.Manufacturer,
 					ShippingCost = productDto.ShippingCost,
 					Vendor = productDto.Vendor,
-					WarrantyPeriod = productDto.WarrantyPeriod
+					WarrantyPeriod = productDto.WarrantyPeriod,
+					Colors = productDto.Colors,
+					Options = productDto.Options
 				};
+
 				await _productService.CreateProductAsync(product);
 				var createdProduct = await _productService.GetProductByIdAsync(product.Id);
+
 				if (createdProduct == null)
 				{
-					return StatusCode(500, "Error oqured in creating product.");
+					return StatusCode(500, "Error occurred while creating the product.");
 				}
+
 				return CreatedAtAction(nameof(GetProductById), new { id = product.Id }, createdProduct);
 			}
 			catch (ArgumentException ex)
@@ -162,30 +265,35 @@ namespace CyberBazaECommerce.Controllers
 			}
 			catch (Exception ex)
 			{
-				return StatusCode(500, $"Error oqured creating product: {ex.Message}");
+				return StatusCode(500, $"Error occurred while creating the product: {ex.Message}");
 			}
 		}
-
 		[HttpPost("many")]
 		[Authorize(Roles = "admin")]
 		public async Task<IActionResult> AddManyProducts([FromBody] CreateProductsDto productsDto)
 		{
+			// Validate CSRF token
 			var validationResult = _csrfValidator.ValidateCsrfToken();
 			if (validationResult is not OkResult)
 			{
 				return validationResult;
 			}
+
+			// Validate input data
 			if (productsDto == null || productsDto.Products == null || !productsDto.Products.Any())
 			{
 				return BadRequest("Need at least one product");
 			}
+
 			try
 			{
+				// Map DTOs to Product entities with updated fields
 				var products = productsDto.Products.Select(dto => new Product
 				{
 					Brand = dto.Brand,
 					Category = dto.Category,
-					Image = dto.Image,
+					MainImage = dto.MainImage, // Updated field for main image
+					AdditionalImages = dto.AdditionalImages, // Updated field for additional images
 					Name = dto.Name,
 					Description = dto.Description,
 					Characteristics = dto.Characteristics,
@@ -199,16 +307,21 @@ namespace CyberBazaECommerce.Controllers
 					StockQuantity = dto.StockQuantity,
 					Weight = dto.Weight,
 					Dimensions = dto.Dimensions,
-					SKU = dto.SKU,
 					Tags = dto.Tags,
 					IsAvailable = dto.IsAvailable,
 					Manufacturer = dto.Manufacturer,
 					ShippingCost = dto.ShippingCost,
 					Vendor = dto.Vendor,
-					WarrantyPeriod = dto.WarrantyPeriod
+					WarrantyPeriod = dto.WarrantyPeriod,
+					Colors = dto.Colors, // Updated field for colors
+					Options = dto.Options // Updated field for options
 				}).ToList();
+
+				// Save products to the database
 				await _productService.CreateManyProductsAsync(products);
-				return Ok("Product Successfully added."); // Или: return CreatedAtAction(nameof(GetProductById), products.Select(p => new { id = p.Id }), products)
+
+				// Return success response
+				return Ok("Products successfully added.");
 			}
 			catch (ArgumentException ex)
 			{
@@ -216,7 +329,7 @@ namespace CyberBazaECommerce.Controllers
 			}
 			catch (Exception ex)
 			{
-				return StatusCode(500, $"error of adding products: {ex.Message}");
+				return StatusCode(500, $"Error occurred while adding products: {ex.Message}");
 			}
 		}
 		[HttpPut("{id}")]

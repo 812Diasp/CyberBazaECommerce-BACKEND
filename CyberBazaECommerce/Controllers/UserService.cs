@@ -17,7 +17,11 @@ namespace CyberBazaECommerce.Controllers
 			return await _users.Find(u => u.Id == id).FirstOrDefaultAsync();
 		}
 
-
+		public async Task<bool> UpdateUserAsync(User user)
+		{
+			var updateResult = await _users.ReplaceOneAsync(u => u.Id == user.Id, user);
+			return updateResult.ModifiedCount > 0;
+		}
 		public async Task<User> GetUserByEmailAsync(string email)
 		{
 			return await _users.Find(u => u.Email == email).FirstOrDefaultAsync();
@@ -46,7 +50,7 @@ namespace CyberBazaECommerce.Controllers
 
 		}
 
-		public async Task AddItemToCartAsync(string userId, string productId, int quantity)
+		public async Task AddItemToCartAsync(string userId, string productId, int quantity, string color, string? variant)
 		{
 			try
 			{
@@ -55,21 +59,49 @@ namespace CyberBazaECommerce.Controllers
 				{
 					throw new ArgumentException($"User with id: {userId} not found");
 				}
-				var existingCartItem = user.Cart?.FirstOrDefault(item => item.ProductId == productId);
+
+				// Фильтр для поиска существующего элемента в корзине
+				var existingCartItem = user.Cart?.FirstOrDefault(item =>
+					item.ProductId == productId &&
+					item.Color == color &&
+					item.Variant == variant);
+
 				if (existingCartItem != null)
 				{
-					var update = Builders<User>.Update.Set("Cart.$[elem].Quantity", existingCartItem.Quantity + quantity);
-					var arrayFilters = new List<ArrayFilterDefinition> { new BsonDocumentArrayFilterDefinition<CartItem>(new BsonDocument("elem.ProductId", productId)) };
-					await _users.UpdateOneAsync(u => u.Id == userId, update, new UpdateOptions { ArrayFilters = arrayFilters });
+					// Обновляем количество для существующего элемента
+					var update = Builders<User>.Update.Set(
+						"Cart.$[elem].Quantity",
+						existingCartItem.Quantity + quantity
+					);
 
+					var arrayFilters = new List<ArrayFilterDefinition>
+			{
+				new BsonDocumentArrayFilterDefinition<CartItem>(new BsonDocument
+				{
+					{ "elem.ProductId", productId },
+					{ "elem.Color", color },
+					{ "elem.Variant", variant ?? "" } // Если variant null, используем пустую строку
+                })
+			};
+
+					await _users.UpdateOneAsync(
+						u => u.Id == userId,
+						update,
+						new UpdateOptions { ArrayFilters = arrayFilters }
+					);
 				}
 				else
 				{
+					// Создаем новый элемент корзины
 					var cartItem = new CartItem
 					{
 						ProductId = productId,
 						Quantity = quantity,
+						Color = color,
+						Variant = variant
 					};
+
+					// Добавляем новый элемент в корзину
 					var update = Builders<User>.Update.Push(u => u.Cart, cartItem);
 					await _users.UpdateOneAsync(u => u.Id == userId, update);
 				}
@@ -84,7 +116,6 @@ namespace CyberBazaECommerce.Controllers
 				Console.WriteLine($"Ошибка при добавлении в корзину: {ex.Message}");
 				throw;
 			}
-
 		}
 
 		public async Task RemoveItemFromCartAsync(string userId, string productId)
@@ -105,7 +136,7 @@ namespace CyberBazaECommerce.Controllers
 				throw;
 			}
 		}
-		public async Task UpdateCartItemQuantityAsync(string userId, string productId, int quantity)
+		public async Task UpdateCartItemQuantityAsync(string userId, string productId, int quantity, string color, string? variant = null)
 		{
 			try
 			{
@@ -114,17 +145,43 @@ namespace CyberBazaECommerce.Controllers
 				{
 					throw new ArgumentException($"User with id: {userId} not found");
 				}
-				if (user.Cart == null)
+
+				if (user.Cart == null || user.Cart.Count == 0)
+				{
 					throw new ArgumentException("Cart is empty");
-				var existingCartItem = user.Cart?.FirstOrDefault(item => item.ProductId == productId);
+				}
+
+				// Ищем элемент в корзине по ProductId, Color и Variant
+				var existingCartItem = user.Cart.FirstOrDefault(item =>
+					item.ProductId == productId &&
+					item.Color == color &&
+					(variant == null || item.Variant == variant));
 
 				if (existingCartItem == null)
-					throw new ArgumentException($"product with id: {productId} not found in cart");
+				{
+					throw new ArgumentException($"Product with id: {productId}, color: {color} and variant: {variant ?? "null"} not found in cart");
+				}
 
+				// Создаем обновление для элемента корзины
 				var update = Builders<User>.Update.Set("Cart.$[elem].Quantity", quantity);
-				var arrayFilters = new List<ArrayFilterDefinition> { new BsonDocumentArrayFilterDefinition<CartItem>(new BsonDocument("elem.ProductId", productId)) };
-				await _users.UpdateOneAsync(u => u.Id == userId, update, new UpdateOptions { ArrayFilters = arrayFilters });
 
+				// Фильтр для выборки элемента по ProductId, Color и Variant
+				var arrayFilters = new List<ArrayFilterDefinition>
+		{
+			new BsonDocumentArrayFilterDefinition<CartItem>(new BsonDocument
+			{
+				{ "elem.ProductId", productId },
+				{ "elem.Color", color },
+				{ "elem.Variant", variant ?? "" } // Если variant null, используем пустую строку
+            })
+		};
+
+				// Выполняем обновление
+				await _users.UpdateOneAsync(
+					u => u.Id == userId,
+					update,
+					new UpdateOptions { ArrayFilters = arrayFilters }
+				);
 			}
 			catch (MongoWriteException ex)
 			{

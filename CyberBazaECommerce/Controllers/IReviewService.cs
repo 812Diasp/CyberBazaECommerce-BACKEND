@@ -16,6 +16,7 @@ namespace CyberBazaECommerce.Controllers
 		private readonly IMongoCollection<Product> _products;
 		private readonly IMongoCollection<Review> _reviews;
 
+
 		public ReviewService(IMongoDatabase database, ILogger<ReviewService> logger)
 		{
 			_products = database.GetCollection<Product>("Products");
@@ -48,6 +49,7 @@ namespace CyberBazaECommerce.Controllers
 			_logger.LogInformation($"Review added to product: {product.Id}, review count: {product.Reviews.Count}");
 			await UpdateProductRatingAsync(productId);
 		}
+
 		public async Task UpdateProductRatingAsync(string productId)
 		{
 			var product = await _products.Find(p => p.Id == productId).FirstOrDefaultAsync();

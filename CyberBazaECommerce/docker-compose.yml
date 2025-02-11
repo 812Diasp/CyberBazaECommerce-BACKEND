@@ -1,0 +1,13 @@
+﻿version: "3.9"
+services:
+  webapi:
+    build:
+      context: .
+      dockerfile: ./CyberBazaECommerce/Dockerfile
+    ports:
+      - "5248:5248" # Проброс порта 5248
+      - "8081:8081" # Проброс порта 8081
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__RedisConnectionString=host.docker.internal:6379
+  

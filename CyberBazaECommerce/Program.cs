@@ -52,7 +52,9 @@ builder.Services.AddScoped<IReviewService, ReviewService>();
 builder.Services.AddScoped<ILogger<ReviewService>, Logger<ReviewService>>();
 //userservice for cart
 builder.Services.AddScoped<UserService>();
+builder.Services.AddSingleton<IOrderService, OrderService>();
 // --- Конец настроек MongoDB ---
+
 
 
 // Configure JWT Authentication
@@ -127,13 +129,19 @@ builder.Services.AddCors(options =>
 	options.AddPolicy("AllowAll", builder =>
 	{
 		builder
-		   .WithOrigins("http://localhost:5173") //  Указываем доверенный домен frontend
+		   .WithOrigins("http://localhost:5173", "http://localhost:5248","http://localhost:5174") // Замените на ваш фронтенд и бекенд домены
 			.AllowAnyMethod()
 			.AllowAnyHeader()
-			.AllowCredentials(); //  Разрешаем отправку кук
+			.AllowCredentials();// уберите это если не нужно передавать куки
 	});
 });
 // -- Конец настройки CORS --
+string redisConnectionString = builder.Configuration.GetConnectionString("RedisConnectionString") ?? "localhost:6379";
+//кэширование redis
+builder.Services.AddStackExchangeRedisCache(options =>
+{
+	options.Configuration = builder.Configuration.GetConnectionString("RedisConnectionString");
+});
 
 var app = builder.Build();
 
@@ -144,7 +152,7 @@ app.UseSwagger();
 app.UseSwaggerUI();
 }
 
-
+app.UseRouting();
 app.UseHttpsRedirection();
 app.UseCors("AllowAll");
 // -- Конец Use CORS --
