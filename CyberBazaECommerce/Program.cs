@@ -55,8 +55,6 @@ builder.Services.AddScoped<UserService>();
 builder.Services.AddSingleton<IOrderService, OrderService>();
 // --- Конец настроек MongoDB ---
 
-
-
 // Configure JWT Authentication
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 	 .AddJwtBearer(options =>
@@ -119,11 +117,11 @@ builder.Services.AddSwaggerGen(c =>
 	new string[] { }
 	 }
 	});
-	c.OperationFilter<AuthorizeCheckOperationFilter>(); // Add this line
+	c.OperationFilter<AuthorizeCheckOperationFilter>(); 
 });
 
 // -- Настройка CORS (если нужно) --
-// Пример настройки, разрешающий запросы с любого домена (не рекомендуется для production)
+// Пример настройки, разрешающий запросы с любого не для продакшн
 builder.Services.AddCors(options =>
 {
 	options.AddPolicy("AllowAll", builder =>
@@ -145,7 +143,6 @@ builder.Services.AddStackExchangeRedisCache(options =>
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
 app.UseSwagger();
@@ -155,7 +152,6 @@ app.UseSwaggerUI();
 app.UseRouting();
 app.UseHttpsRedirection();
 app.UseCors("AllowAll");
-// -- Конец Use CORS --
 app.UseAuthentication();
 app.UseAuthorization();
 

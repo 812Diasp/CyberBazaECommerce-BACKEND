@@ -40,17 +40,17 @@ namespace CyberBazaECommerce.Controllers
 			if (cachedProducts != null) // Если данные есть в кеше
 			{
 				var products = JsonSerializer.Deserialize<List<Product>>(cachedProducts);
-				var filteredProducts = products.Where(p => p.Category != "18+").ToList(); // Фильтруем данные из кэша
+				var filteredProducts = products.Where(p => p.Category != "18+").ToList(); 
 
-				return Ok(filteredProducts); // Возвращаем отфильтрованные данные из кэша
+				return Ok(filteredProducts); 
 			}
 
-			var productsFromDb = await _productService.GetProductsAsync(); // Получаем данные из сервиса (базы данных)
+			var productsFromDb = await _productService.GetProductsAsync(); 
 
-			var filteredProductsFromDb = productsFromDb.Where(p => p.Category != "18+").ToList(); // Фильтруем данные из базы данных
+			var filteredProductsFromDb = productsFromDb.Where(p => p.Category != "18+").ToList(); 
 
 			var cacheOptions = new DistributedCacheEntryOptions()
-				.SetAbsoluteExpiration(DateTime.Now.AddMinutes(5)); // Устанавливаем время жизни кэша (например, 5 минут)
+				.SetAbsoluteExpiration(DateTime.Now.AddMinutes(5)); 
 
 			// Сериализуем данные в JSON
 			await _distributedCache.SetStringAsync(recordKey, JsonSerializer.Serialize(filteredProductsFromDb), cacheOptions); // Сохраняем отфильтрованные данные в кэше
